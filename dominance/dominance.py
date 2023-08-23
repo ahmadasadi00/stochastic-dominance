@@ -15,16 +15,18 @@ class StochasticDominance:
                  dominance_lookback: int,
                  benchmark: str = None
                  ) -> None:
-        """
+        """General setting for Stochastic Dominance object
 
         Args:
-            order (Order): _description_
-            active_passive (Active_Passive): _description_
-            dominance_lookback (int): _description_
-            benchmark (str, optional): _description_. Defaults to None.
+            order (Order): The order of calculation of dominance 
+            active_passive (Active_Passive): using active returns or passive returns, active returns 
+                                             means we only care about the returns minus a benchmark
+            dominance_lookback (int): the lookback i.e. number of return observations we use to calculate dominance, 
+                                      if it's None means use all available data between start_date and end_date
+            benchmark (str, optional): the symbol of benchmark, you must provide it if you want to use active returns. Defaults to None.
 
         Raises:
-            Exception: _description_
+            Exception: If you want to use Active and didn't provide a symbol for bechmark returns
         """
         self.order = order
         self.active_passive = active_passive
@@ -35,9 +37,9 @@ class StochasticDominance:
         pass
     
     def __calculate_dominance(self, 
-                              instrument_cdf,
-                              primary, 
-                              second_instrument):
+                              instrument_cdf: T.Dict,
+                              primary: str, 
+                              second_instrument: str):
         if primary not in instrument_cdf or second_instrument not in instrument_cdf:
             return 0
 
@@ -143,8 +145,8 @@ class StochasticDominance:
         return res
     
     def __calculate_cdf(self, 
-                        prices, 
-                        names,):
+                        prices: T.Dict, 
+                        names: T.List[str],):
         cdf = {}
         for instrument_name in names:
             symbol_price = prices[instrument_name]
@@ -179,19 +181,42 @@ class StochasticDominance:
     
     def get_dominance(
         self,
-        instrument_returns, 
-        start_time, 
-        end_time,
-        names,
-        ):
+        instrument_returns: T.Dict, 
+        start_time: pd.Timestamp, 
+        end_time: pd.Timestamp,
+        names: T.List[str],
+        ) -> T.Dict:
+        """A function that gets the clean data and calculated the stochastic dominance across all names that are provided
+
+        Args:
+            instrument_returns (T.Dict): The dictionary of prices, each key is the symbol and contains tha dataframe of returns
+            start_time (pd.Timestamp): the start time which we want to calculate dominance
+            end_time (pd.Timestamp): the end time whicj we want to calculate dominance
+            names (T.List[str]): the symbols we want to calculate dominance among them
+
+        Returns:
+            T.Dict[T.Dict]: The results of dominance, 
+                    `better_count`: this name is dominant of how many other symbols
+                    `worst_count`: this name is dominated by how many other symbols
+                    `better_names`: the names that this name is dominant of them
+                    `worst_names`: the names that this name is dominated by
+                    `name`: the symbol
+                    
+        """
+        
+        if names is None:
+            names = list(instrument_returns.keys())
+        
         for symbol in names:
             instrument_returns[symbol] = instrument_returns[symbol][(instrument_returns[symbol]['date'] >= start_time) & 
                                                                     (instrument_returns[symbol]['date'] < end_time)]
+            if (self.dominance_lookback is not None) and  (len(instrument_returns[symbol]) > self.dominance_lookback):
+                instrument_returns[symbol] = instrument_returns[symbol].iloc[-self.dominance_lookback:]
         
         dominance_results_dict = {}
         instrument_cdf = self.__calculate_cdf(instrument_returns, names,)
         for name in names:
-            dominance_results_dict[name] = {'better_count': 0, 'worst_count': 0, 'name': name, 'names': [],
+            dominance_results_dict[name] = {'better_count': 0, 'worst_count': 0, 'name': name, 'better_names': [],
                                             'worst_names': []}
 
         stop = len(names)
@@ -205,12 +230,12 @@ class StochasticDominance:
                 second = names[j]
                 dominance_result = self.__calculate_dominance(instrument_cdf, first, second)
                 if dominance_result == 1:
-                    dominance_results_dict[first]['names'].append(second)
+                    dominance_results_dict[first]['better_names'].append(second)
                     dominance_results_dict[second]['worst_names'].append(first)
                     dominance_results_dict[first]['better_count'] += 1
                     dominance_results_dict[second]['worst_count'] += 1
                 elif dominance_result == -1:
-                    dominance_results_dict[second]['names'].append(first)
+                    dominance_results_dict[second]['better_names'].append(first)
                     dominance_results_dict[second]['better_count'] += 1
                     dominance_results_dict[first]['worst_count'] += 1
                     dominance_results_dict[first]['worst_names'].append(second)
